@@ -25,22 +25,15 @@ import tk.glucodata.ExchangeToggles
 import tk.glucodata.R
 import tk.glucodata.UiRefreshBus
 import tk.glucodata.WearToggleSync
+import tk.glucodata.ui.WearNavigationRow
 import tk.glucodata.ui.WearSectionTitle
 
 /**
- * On/off for the exchange outputs that are a plain switch.
- *
- * The phone is the authority: the outputs only ever run there, so a switch here
- * asks it to change and renders what it reports back. A flip that does not take
- * therefore returns on its own rather than showing a state that is not real.
- *
- * Outputs configured by a URL or a recipient list — Nightscout, the outbound
- * API, the Juggluco / patched-Libre broadcasts — are not here: for
- * those "off" would mean discarding configuration, which a switch on a watch
- * should not do silently.
+ * Local Nightscout settings and the existing switches for phone outputs.
+ * The phone remains the authority for those switches.
  */
 @Composable
-fun ExchangeScreen() {
+fun ExchangeScreen(onOpenNightscout: () -> Unit) {
     var revision by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
@@ -54,6 +47,12 @@ fun ExchangeScreen() {
             contentPadding = PaddingValues(horizontal = 22.dp, vertical = 28.dp),
         ) {
             item { WearSectionTitle(stringResource(R.string.wear_exchange_title)) }
+            item {
+                WearNavigationRow(
+                    title = stringResource(R.string.wear_upload_title),
+                    onClick = onOpenNightscout,
+                )
+            }
             items(ExchangeToggles.all) { toggle ->
                 val known = remember(revision, toggle.id) {
                     WearToggleSync.knownEnabled(WearToggleSync.SCOPE_EXCHANGE, toggle.id)
@@ -72,7 +71,7 @@ fun ExchangeScreen() {
             }
             item {
                 Text(
-                    text = stringResource(R.string.wear_exchange_phone_only),
+                    text = stringResource(R.string.wear_upload_phone_outputs),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp),

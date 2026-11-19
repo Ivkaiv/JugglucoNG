@@ -734,6 +734,8 @@ public class Natives {
          * Returns null if sensor not found or has no data.
          */
         public static native long[] getGlucoseHistoryForSensor(String sensorName, long starttime);
+        /** Wear only. Returns the V3 payload for the exact native sample, or null if unavailable. */
+        public static native String wearNightscoutEntry(String sensorName, long timeSec);
 
         /**
          * Libre 1/2 only: the sensor's own 15-minute history (FRAM, or the history

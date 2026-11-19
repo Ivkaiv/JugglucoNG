@@ -16,6 +16,8 @@ import tk.glucodata.ui.screens.RecentReadingsScreen
 import tk.glucodata.ui.screens.SensorScreen
 import tk.glucodata.ui.screens.ExchangeScreen
 import tk.glucodata.ui.screens.SettingsScreen
+import tk.glucodata.wearupload.WearUploadScreen
+import tk.glucodata.wearupload.WearUploadSettingsScreen
 
 object WearRoutes {
     const val MAIN = "main"
@@ -27,6 +29,8 @@ object WearRoutes {
     const val READINGS = "readings"
     const val SETTINGS = "settings"
     const val EXCHANGE = "exchange"
+    const val NIGHTSCOUT_UPLOAD = "nightscout_upload"
+    const val NIGHTSCOUT_UPLOAD_SETTINGS = "nightscout_upload_settings"
     const val JOURNAL = "journal"
     const val JOURNAL_ENTRY = "journalentry"
     const val READING_ACTIONS = "readingactions"
@@ -186,7 +190,15 @@ fun WearApp() {
                     onOpenExchange = { navController.navigate(WearRoutes.EXCHANGE) },
                 )
             }
-            composable(WearRoutes.EXCHANGE) { ExchangeScreen() }
+            composable(WearRoutes.EXCHANGE) {
+                ExchangeScreen(onOpenNightscout = { navController.navigate(WearRoutes.NIGHTSCOUT_UPLOAD) })
+            }
+            composable(WearRoutes.NIGHTSCOUT_UPLOAD) {
+                WearUploadScreen(onEdit = { navController.navigate(WearRoutes.NIGHTSCOUT_UPLOAD_SETTINGS) })
+            }
+            composable(WearRoutes.NIGHTSCOUT_UPLOAD_SETTINGS) {
+                WearUploadSettingsScreen(onSaved = { navController.popBackStack() })
+            }
         }
     }
 }

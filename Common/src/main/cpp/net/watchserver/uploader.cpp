@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 #include "settings/settings.hpp"
+#include "fromjava.h"
 #include "share/logs.hpp"
 #include "sensoren.hpp"
 #include "nums/numdata.hpp"
@@ -697,11 +698,11 @@ static int uploadSmoothingSeconds=0;
 //fall in the window. Polls are time-ordered, so an empty slot or a sample past the
 //window ends the walk.
 template <class Getvalue>
-static int smoothPollWindow(std::span<const ScanData> gdata,const int pos,Getvalue getvalue) {
-    if(uploadSmoothingSeconds<=0||pos<0||pos>=(int)gdata.size())
+static int smoothPollWindow(std::span<const ScanData> gdata,const int pos,const int smoothingSeconds,Getvalue getvalue) {
+    if(smoothingSeconds<=0||pos<0||pos>=(int)gdata.size())
         return 0;
     const uint32_t tim=gdata[pos].gettime();
-    const uint32_t half=(uint32_t)uploadSmoothingSeconds/2;
+    const uint32_t half=(uint32_t)smoothingSeconds/2;
     if(!tim||!half||getvalue(pos)<=0)
         return 0;
     const uint64_t minTime=tim>=half?tim-half:0;
@@ -776,12 +777,12 @@ static int smoothPollWindow(std::span<const ScanData> gdata,const int pos,Getval
 
 //Deliberately never calls ScanData::valid(): that patches a zero timestamp from the
 //preceding entry as a side effect, which a read-only averaging pass must not do.
-static int smoothedUploadMgdl(std::span<const ScanData> gdata,const int pos) {
+static int smoothedUploadMgdl(std::span<const ScanData> gdata,const int pos,const int smoothingSeconds) {
     // A resolved primary already matches live publishing. Keep the upstream
     // final value in both upload paths, even when stock history is smoothed.
     if(pos<0||pos>=(int)gdata.size()||gdata[pos].hasResolvedGlucose())
         return 0;
-    return smoothPollWindow(gdata,pos,[gdata,pos](const int i) {
+    return smoothPollWindow(gdata,pos,smoothingSeconds,[gdata,pos](const int i) {
         // An upgrade can leave both stock and final samples in this window.
         // Average only the representation to which the caller's calibration applies.
         if(gdata[i].hasResolvedGlucose()!=gdata[pos].hasResolvedGlucose())
@@ -793,8 +794,8 @@ static int smoothedUploadMgdl(std::span<const ScanData> gdata,const int pos) {
 
 //getRawForPoll indexes by pointer offset into the polls array, which is exactly what
 //gdata spans here, so neighbouring raw values line up with their auto counterparts.
-static int smoothedUploadRaw(const SensorGlucoseData *sens,std::span<const ScanData> gdata,const int pos) {
-    return smoothPollWindow(gdata,pos,[sens,gdata](const int i) {
+static int smoothedUploadRaw(const SensorGlucoseData *sens,std::span<const ScanData> gdata,const int pos,const int smoothingSeconds) {
+    return smoothPollWindow(gdata,pos,smoothingSeconds,[sens,gdata](const int i) {
         return (int)sens->getRawForPoll(&gdata[i]);
         });
     }
@@ -805,12 +806,12 @@ static int smoothedUploadRaw(const SensorGlucoseData *sens,std::span<const ScanD
 //Average before calibrating, not after: calibrateONE is affine in the value, so this yields the
 //same series the app's own smoothed display and broadcasts carry. getRawForPoll indexes by pointer
 //offset from the polls base, so it is handed the stored reading, never the patched copy.
-static int uploadValueMgdl(SensorGlucoseData *sens,const char *sensornameStr,std::span<const ScanData> gdata,const int pos) {
+static int uploadValueMgdl(SensorGlucoseData *sens,const char *sensornameStr,std::span<const ScanData> gdata,const int pos,const int smoothingSeconds=uploadSmoothingSeconds) {
     const ScanData &item=gdata[pos];
-    const int rawSmoothed=smoothedUploadRaw(sens,gdata,pos);
+    const int rawSmoothed=smoothedUploadRaw(sens,gdata,pos,smoothingSeconds);
     const int rawCurrent=rawSmoothed>0?rawSmoothed:sens->getRawForPoll(&item);
     ScanData smoothed=item;
-    if(const int avg=smoothedUploadMgdl(gdata,pos);avg>0)
+    if(const int avg=smoothedUploadMgdl(gdata,pos,smoothingSeconds);avg>0)
         smoothed.setmgdL(avg);
     int autoMgdl=smoothed.getmgdL();
     if(double calibrated=calibrateONEtest(sens,smoothed);!isnan(calibrated))
@@ -828,9 +829,9 @@ static int uploadValueMgdl(SensorGlucoseData *sens,const char *sensornameStr,std
 //here from the values actually uploaded, over the span derivechangeforsample uses: the same lane
 //and calibration as the sgv, whichever the view mode selects. Final values supplied by another
 //app are never smoothed, so they keep their stored rate.
-static float uploadChange(SensorGlucoseData *sens,const char *sensornameStr,std::span<const ScanData> gdata,const int pos,const int mgdL) {
+static float uploadChange(SensorGlucoseData *sens,const char *sensornameStr,std::span<const ScanData> gdata,const int pos,const int mgdL,const int smoothingSeconds=uploadSmoothingSeconds) {
     const ScanData &item=gdata[pos];
-    if(uploadSmoothingSeconds<=0||item.hasResolvedGlucose()||pos<=0||mgdL<=0)
+    if(smoothingSeconds<=0||item.hasResolvedGlucose()||pos<=0||mgdL<=0)
         return effectivechange(gdata,pos,item);
     const uint32_t tim=item.gettime();
     for(int i=pos-1;i>=0;--i) {
@@ -843,7 +844,7 @@ static float uploadChange(SensorGlucoseData *sens,const char *sensornameStr,std:
             break;
         if(tim-prevtime<minderivegapsecs||prev.hasResolvedGlucose())
             continue;
-        const float rate=deriveChangeMgdlPerMinute(uploadValueMgdl(sens,sensornameStr,gdata,i),prevtime,mgdL,tim);
+        const float rate=deriveChangeMgdlPerMinute(uploadValueMgdl(sens,sensornameStr,gdata,i,smoothingSeconds),prevtime,mgdL,tim);
         if(!std::isnan(rate))
             return rate;
         }
@@ -966,17 +967,50 @@ static nightscout_backlog::Turn uploadV1ChunkIndividually(const int sensorid,Sen
         liveWakePending);
     }
 
-static const char *writeNightscoutV3UploadEntry(char *buf,SensorGlucoseData *sens,const sensorname_t *sensorname,const ScanData *el,std::span<const ScanData> gdata,const int pos) {
+static const char *writeNightscoutV3UploadEntry(char *buf,SensorGlucoseData *sens,const sensorname_t *sensorname,const ScanData *el,std::span<const ScanData> gdata,const int pos,const int smoothingSeconds=uploadSmoothingSeconds) {
 extern char * writev3entry(char *outin,const ScanData *val, const sensorname_t *sensorname,bool server=true,
 	const std::string_view &uploadid={});
     char sensornameStr[64];
     copyfixedsensorname(sensornameStr,sizeof(sensornameStr),sensorname);
-    const int mgdL=uploadValueMgdl(sens,sensornameStr,gdata,pos);
+    const int mgdL=uploadValueMgdl(sens,sensornameStr,gdata,pos,smoothingSeconds);
     ScanData outel=*el;
     outel.setmgdL(mgdL);
-    outel.ch=uploadChange(sens,sensornameStr,gdata,pos,mgdL);
+    outel.ch=uploadChange(sens,sensornameStr,gdata,pos,mgdL,smoothingSeconds);
     return writev3entry(buf,&outel,sensorname,false,sens->sensid());
     }
+
+#ifdef WEAROS
+// The standalone outbox writes the same SGV and identifier as the native V3
+// uploader. The driver supplies only a just-accepted local sample, never a
+// time range or a list of mirrored readings.
+extern "C" JNIEXPORT jstring JNICALL fromjava(wearNightscoutEntry)
+        (JNIEnv *env,jclass,jstring sensorName,jlong timeSec) {
+    if(!sensors||!sensorName||timeSec<=0||timeSec>UINT32_MAX)
+        return nullptr;
+    const char *name=env->GetStringUTFChars(sensorName,nullptr);
+    if(!name)
+        return nullptr;
+    std::lock_guard guard(SensorGlucoseData::pollWriteMutex());
+    SensorGlucoseData *sens=sensors->getSensorData(name);
+    if(!sens)
+        sens=sensors->gethistshort(name);
+    env->ReleaseStringUTFChars(sensorName,name);
+    if(!sens)
+        return nullptr;
+    const auto gdata=sens->getPolldata();
+    for(int pos=static_cast<int>(gdata.size())-1;pos>=0;--pos) {
+        const auto &sample=gdata[pos];
+        if(sample.gettime()!=timeSec||!sample.valid(0))
+            continue;
+        char buf[512];
+        const char *end=writeNightscoutV3UploadEntry(buf,sens,sens->shortsensorname(),&sample,gdata,pos,
+            getExchangeSmoothingSeconds());
+        buf[end-buf]='\0';
+        return env->NewStringUTF(buf);
+        }
+    return nullptr;
+    }
+#endif
 
 static bool uploadRecentV3(const int sensorid,SensorGlucoseData *sens,const sensorname_t *sensorname,std::span<const ScanData> gdata,const uint32_t mintime) {
     for(int iter=gdata.size()-1;iter>=0;--iter) {
@@ -1433,7 +1467,6 @@ static bool wakestreamuploader(JNIEnv *env,const char *source,const long long ti
 void wakestreamuploader() {
     wakestreamuploader(getenv(),"native",0);
     }
-#include "fromjava.h"    
 extern "C" JNIEXPORT void JNICALL fromjava(wakeuploader) (JNIEnv *env, jclass clazz) {
     wakeuploader();
     } 

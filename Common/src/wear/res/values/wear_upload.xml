@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wear_upload_native_enabled">Turn off the other Nightscout uploader on this watch first.</string>
+    <string name="wear_upload_title">Nightscout from watch</string>
+    <string name="wear_upload_token">Nightscout access token</string>
+    <string name="wear_upload_start_hint">Nightscout API v3 receives new readings from a Sibionics sensor connected directly to this watch.</string>
+    <string name="wear_upload_token_help">Create a token with permission to write readings in Nightscout. The watch keeps this token locally.</string>
+    <string name="wear_upload_only_uploader">I turned off sending these readings to this server on my phone and other devices</string>
+    <string name="wear_upload_phone_outputs">Set up phone uploads, the outbound API, and recipient broadcasts on the phone.</string>
+    <string name="wear_upload_start">Enable</string>
+    <string name="wear_upload_stop">Stop upload</string>
+    <string name="wear_upload_stop_hint">Remove the token and the unsent queue from this watch?</string>
+    <string name="wear_upload_network">No confirmed delivery. Will retry.</string>
+    <string name="wear_upload_full">Local queue is full.</string>
+    <string name="wear_upload_error">Check the HTTPS address and access token, or try again.</string>
+    <string name="wear_upload_edit">Address and token</string>
+    <string name="wear_upload_address">Server address</string>
+    <string name="wear_upload_active">Uploads on</string>
+    <string name="wear_upload_inactive">Uploads off</string>
+    <string name="wear_upload_pending">Queued: %1$d</string>
+    <string name="wear_upload_last">Last delivered reading: %1$s</string>
+    <string name="wear_upload_send_now">Send now</string>
+    <string name="wear_upload_send_requested">Upload requested.</string>
+    <string name="wear_upload_empty">The queue is empty.</string>
+    <string name="wear_upload_token_saved">Token saved</string>
+    <string name="wear_upload_keep_token">Leave blank to keep the saved token.</string>
+    <string name="wear_upload_bad_address">Enter an HTTPS server address without a path.</string>
+    <string name="wear_upload_token_required">Enter a Nightscout access token for this server.</string>
+    <string name="wear_upload_pending_on_previous">Send the existing queue to its server, or stop uploads and confirm clearing the queue before switching servers.</string>
+    <string name="wear_upload_bad_token">HTTP 401: Check the access token.</string>
+    <string name="wear_upload_forbidden">HTTP 403: The token needs permission to write readings.</string>
+</resources>

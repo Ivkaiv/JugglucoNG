@@ -74,6 +74,7 @@ static void registerBridges() {
         ComplicationConfigAccess.register(new tk.glucodata.glucosecomplication.WearColorConfig());
     GlucoseValueRefreshAccess.register(tk.glucodata.glucosecomplication.WearGlucoseValueRefresh.INSTANCE);
     OngoingNotificationAccess.register(WearOngoingActivity.INSTANCE);
+    WearNightscoutUploadAccess.register(tk.glucodata.wearupload.WearSibionicsUploader.INSTANCE);
     if (!FloatingConfigScreenAccess.isRegistered())
         FloatingConfigScreenAccess.register(new WearFloatingConfig());
     if (!SetColorsScreenAccess.isRegistered())

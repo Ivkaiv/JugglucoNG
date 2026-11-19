@@ -74,6 +74,7 @@ class SibionicsBleManager(
         val live: Boolean,
         /** Credible interval in mg/dL; null for every model that does not estimate one. */
         val uncertainty: tk.glucodata.GlucoseUncertainty? = null,
+        val sourceTimestampTrusted: Boolean = false,
     )
 
     private data class AlgorithmRebuildResult(
@@ -1434,6 +1435,7 @@ class SibionicsBleManager(
                     impedance = entry.rawImpedance.toFloat(),
                     eventMs = eventMs,
                     live = entry.isLive,
+                    sourceTimeMs = entry.eventTimeMs(now),
                 )
             }
         flushAlgorithmCheckpointIfDirty()
@@ -1483,6 +1485,7 @@ class SibionicsBleManager(
                     impedance = entry.rawImpedance.toFloat(),
                     eventMs = sanitizeSampleTime(entry.eventTimeMs),
                     live = isV120Current(entry, now),
+                    sourceTimeMs = entry.eventTimeMs,
                 )
             }
         flushAlgorithmCheckpointIfDirty()
@@ -1666,6 +1669,7 @@ class SibionicsBleManager(
         impedance: Float,
         eventMs: Long,
         live: Boolean,
+        sourceTimeMs: Long,
     ): EmittedReading? {
         if (index < 0 || eventMs <= 0L) return null
         // Session restarts are decided per batch, before the journal, in
@@ -1765,6 +1769,7 @@ class SibionicsBleManager(
             index = index,
             live = live,
             uncertainty = uncertaintyMmol?.scaled(SibionicsConstants.MGDL_PER_MMOLL),
+            sourceTimestampTrusted = live && eventMs == sourceTimeMs,
         )
     }
 
@@ -2411,7 +2416,8 @@ class SibionicsBleManager(
             SibionicsRegistry.saveLastReading(it, SerialNumber, reading.sampleMs, reading.glucoseMgdl, reading.rawMgdl)
         }
         storeUncertainty(listOf(reading))
-        if (mirrorReadingIntoNative(reading)) {
+        val stored = mirrorReadingIntoNative(reading)
+        if (stored) {
             NightscoutUploadWake.afterLiveNativeWrite("sibionics-managed", reading.sampleMs)
         }
         // Notification only — no timestamp or value is derived from this. It tells
@@ -2419,6 +2425,9 @@ class SibionicsBleManager(
         // over its own connection, which is what lets the phone stand down after
         // a handoff instead of holding the sensor as well.
         markLocalReadingAccepted(reading.sampleMs)
+        if (stored && reading.sourceTimestampTrusted) {
+            tk.glucodata.WearNightscoutUploadAccess.offer(SerialNumber, reading.sampleMs)
+        }
         HistorySyncAccess.storeCurrentReadingAsync(
             reading.sampleMs,
             reading.glucoseMgdl,
