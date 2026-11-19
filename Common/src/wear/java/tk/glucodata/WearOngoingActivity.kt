@@ -11,8 +11,10 @@ import androidx.wear.ongoing.Status
 
 object WearOngoingActivity : OngoingNotification {
     private const val LOG_ID = "WearOngoingActivity"
+    private val showOnWatchFace = BuildConfig.APPLICATION_ID != "tk.glucodata.ng.wearpilot"
 
     override fun attach(context: Context, notification: Notification, notificationId: Int): Notification {
+        if (!showOnWatchFace) return notification
         return try {
             val builder = NotificationCompat.Builder(context, notification)
             OngoingActivity.Builder(context, notificationId, builder)
@@ -32,7 +34,7 @@ object WearOngoingActivity : OngoingNotification {
     }
 
     override fun updateStatus(context: Context?, notificationId: Int) {
-        context ?: return
+        if (!showOnWatchFace || context == null) return
         try {
             OngoingActivity.recoverOngoingActivity(context, notificationId)
                 ?.update(context, status(context))

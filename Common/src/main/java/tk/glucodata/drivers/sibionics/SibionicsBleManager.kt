@@ -64,6 +64,20 @@ class SibionicsBleManager(
         MANUAL,
     }
 
+    internal data class LocalCalibrationSession(
+        val sensorStartMs: Long,
+        val variantId: Int,
+        val probeFingerprint: Int,
+        val sensitivityBits: Int,
+    )
+
+    internal data class LocalCalibrationSample(
+        val session: LocalCalibrationSession,
+        val timestampMs: Long,
+        val stockMgdl: Float,
+        val displayedMgdl: Float,
+    )
+
     private data class EmittedReading(
         val sampleMs: Long,
         val glucoseMgdl: Float,
@@ -74,6 +88,8 @@ class SibionicsBleManager(
         val live: Boolean,
         /** Credible interval in mg/dL; null for every model that does not estimate one. */
         val uncertainty: tk.glucodata.GlucoseUncertainty? = null,
+        val unsanitizedLiveTimeMs: Long = 0L,
+        val localCalibrationSample: LocalCalibrationSample? = null,
     )
 
     private data class AlgorithmRebuildResult(
@@ -217,6 +233,7 @@ class SibionicsBleManager(
     @Volatile private var connectionPrioritySettled: Boolean = false
     @Volatile private var highPriorityCapArmed: Boolean = false
     @Volatile private var uiPaused: Boolean = false
+    @Volatile private var latestLocalCalibrationSample: LocalCalibrationSample? = null
     @Volatile private var pendingMatchedBleName: String = ""
     @Volatile private var autoResetDays: Int = 300
     @Volatile private var autoResetScheduled: Boolean = false
@@ -480,6 +497,20 @@ class SibionicsBleManager(
     override fun supportsDisplayModes(): Boolean = true
 
     override fun supportsManualCalibration(): Boolean = false
+
+    internal fun localCalibrationSession(): LocalCalibrationSession? {
+        val start = startTimeMs
+        if (start <= 0L || stop || uiPaused ||
+            algorithmSelection != SibionicsAlgorithmSelection.STOCK_CALIBRATED
+        ) return null
+        return LocalCalibrationSession(start, variant.ordinal, shortCode.hashCode(), sensitivity.toRawBits())
+    }
+
+    internal fun localCalibrationSample(): LocalCalibrationSample? =
+        latestLocalCalibrationSample?.takeIf {
+            it.session == localCalibrationSession() &&
+                phase == Phase.STREAMING && hasLocallyConnectedGatt()
+        }
 
     override fun integratesUserCalibration(isRawMode: Boolean): Boolean =
         !isRawMode && algorithmSelection.calibrationEnabled
@@ -1422,6 +1453,7 @@ class SibionicsBleManager(
                     impedance = entry.rawImpedance.toFloat(),
                     eventMs = eventMs,
                     live = entry.isLive,
+                    sourceTimeMs = entry.eventTimeMs(now),
                 )
             }
         flushAlgorithmCheckpointIfDirty()
@@ -1471,6 +1503,7 @@ class SibionicsBleManager(
                     impedance = entry.rawImpedance.toFloat(),
                     eventMs = sanitizeSampleTime(entry.eventTimeMs),
                     live = isV120Current(entry, now),
+                    sourceTimeMs = entry.eventTimeMs,
                 )
             }
         flushAlgorithmCheckpointIfDirty()
@@ -1654,6 +1687,7 @@ class SibionicsBleManager(
         impedance: Float,
         eventMs: Long,
         live: Boolean,
+        sourceTimeMs: Long,
     ): EmittedReading? {
         if (index < 0 || eventMs <= 0L) return null
         // Session restarts are decided per batch, before the journal, in
@@ -1703,6 +1737,8 @@ class SibionicsBleManager(
             }
         }
         var uncertaintyMmol: tk.glucodata.GlucoseUncertainty? = null
+        var calibrationSession: LocalCalibrationSession? = null
+        var calibrationStockMgdl = Float.NaN
         val displayMmol = synchronized(algorithmLock) {
             if (index <= 1) algorithm.reset()
             val stockMmol = algorithm.processStock(
@@ -1712,6 +1748,10 @@ class SibionicsBleManager(
                 mode = if (live) SibionicsAlgorithmMode.LIVE else SibionicsAlgorithmMode.REPLAY,
             )
             val measurementMmol = integratedCalibratedMmol(stockMmol, eventMs)
+            if (Applic.isWearable && live && eventMs == sourceTimeMs) {
+                calibrationSession = localCalibrationSession()
+                calibrationStockMgdl = stockMmol * SibionicsConstants.MGDL_PER_MMOLL
+            }
             val value = algorithm.processPreparedMeasurement(
                 stockMmol = stockMmol,
                 measurementMmol = measurementMmol,
@@ -1753,6 +1793,10 @@ class SibionicsBleManager(
             index = index,
             live = live,
             uncertainty = uncertaintyMmol?.scaled(SibionicsConstants.MGDL_PER_MMOLL),
+            unsanitizedLiveTimeMs = if (live && eventMs == sourceTimeMs) sourceTimeMs else 0L,
+            localCalibrationSample = calibrationSession
+                ?.takeIf { SibionicsConstants.isValidAlgorithmGlucoseMgdl(calibrationStockMgdl) }
+                ?.let { LocalCalibrationSample(it, eventMs, calibrationStockMgdl, glucoseMgdl) },
         )
     }
 
@@ -2373,6 +2417,7 @@ class SibionicsBleManager(
     }
 
     private fun publishLiveReading(reading: EmittedReading) {
+        latestLocalCalibrationSample = reading.localCalibrationSample
         val previousTime = latestReadingTimeMs
         val previousValue = latestGlucoseMgdl
         latestReadingTimeMs = reading.sampleMs
@@ -2390,7 +2435,8 @@ class SibionicsBleManager(
             SibionicsRegistry.saveLastReading(it, SerialNumber, reading.sampleMs, reading.glucoseMgdl, reading.rawMgdl)
         }
         storeUncertainty(listOf(reading))
-        if (mirrorReadingIntoNative(reading)) {
+        val nativeWritten = mirrorReadingIntoNative(reading)
+        if (nativeWritten) {
             NightscoutUploadWake.afterLiveNativeWrite("sibionics-managed", reading.sampleMs)
         }
         // Notification only — no timestamp or value is derived from this. It tells
@@ -2398,6 +2444,11 @@ class SibionicsBleManager(
         // over its own connection, which is what lets the phone stand down after
         // a handoff instead of holding the sensor as well.
         markLocalReadingAccepted(reading.sampleMs)
+        if (nativeWritten) {
+            tk.glucodata.WearSibionicsUploadAccess.offer(
+                SerialNumber, startTimeMs, reading.index, reading.unsanitizedLiveTimeMs, reading.glucoseMgdl,
+            )
+        }
         HistorySyncAccess.storeCurrentReadingAsync(
             reading.sampleMs,
             reading.glucoseMgdl,
@@ -2890,7 +2941,13 @@ class SibionicsBleManager(
             isVendorConnected = mBluetoothGatt != null && phase == Phase.STREAMING,
             sensorRemainingHours = remainingHours(),
             sensorAgeHours = ageHours(),
-            batteryPercent = if (variant == SibionicsConstants.Variant.SIBIONICS2) lastBatteryPercent else -1,
+            // On the watch, show the decoded standard BLE battery level whenever
+            // this transmitter actually supplies it, including GS1 variants.
+            batteryPercent = if (Applic.isWearable || variant == SibionicsConstants.Variant.SIBIONICS2) {
+                lastBatteryPercent
+            } else {
+                -1
+            },
             vendorModel = variant.displayLabel,
 //            vendorFirmware = SibionicsConstants.initialProtocolMode(variant, protocolMode).name,
         )

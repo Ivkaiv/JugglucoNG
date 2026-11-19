@@ -127,7 +127,8 @@ fun SensorScreen(onCalibrate: () -> Unit, onOpenSettings: (() -> Unit)? = null) 
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val sensors = remember(revision) { loadSensors() }
     val canCalibrate = remember(revision) {
-        findCalibratableDriver() != null ||
+        tk.glucodata.WearSibionicsCalibration.selectedSession() != null ||
+            findCalibratableDriver() != null ||
             (tk.glucodata.MessageSender.isWearTransportAvailable() &&
                 tk.glucodata.MessageSender.getMessageSender() != null)
     }
@@ -249,6 +250,12 @@ fun SensorScreen(onCalibrate: () -> Unit, onOpenSettings: (() -> Unit)? = null) 
                     details.detailedStatus
                         .takeIf { it.isNotEmpty() && !it.equals(connection, ignoreCase = true) }
                         ?.let { SensorDetailRow(stringResource(R.string.status), it) }
+                    details.batteryPercent?.let { percent ->
+                        SensorDetailRow(
+                            stringResource(R.string.sensor_battery_voltage),
+                            java.text.NumberFormat.getPercentInstance().format(percent / 100.0),
+                        )
+                    }
                     details.dayValueText.takeIf { it.isNotEmpty() }?.let {
                         SensorDetailRow(
                             stringResource(R.string.wear_sensor_day_label),

@@ -67,12 +67,14 @@ static void registerBridges() {
     TrendAccess.register(tk.glucodata.logic.TrendEngineVelocityProvider.INSTANCE);
     tk.glucodata.ui.ComposeHostAccess.register(tk.glucodata.ui.WearComposeHost.INSTANCE);
     CalibrationAccess.register(SyncedWearCalibrationProvider.INSTANCE);
+    WearSibionicsCalibration.register();
     tk.glucodata.ui.AlarmActivityAccess.register(tk.glucodata.ui.WearAlarmActivityHost.INSTANCE);
     // start() calls this again; build each instance once.
     if (!ComplicationConfigAccess.isRegistered())
         ComplicationConfigAccess.register(new tk.glucodata.glucosecomplication.WearColorConfig());
     GlucoseValueRefreshAccess.register(tk.glucodata.glucosecomplication.WearGlucoseValueRefresh.INSTANCE);
     OngoingNotificationAccess.register(WearOngoingActivity.INSTANCE);
+    WearSibionicsUploadAccess.register(tk.glucodata.wearupload.WearSibionicsUploader.INSTANCE);
     if (!FloatingConfigScreenAccess.isRegistered())
         FloatingConfigScreenAccess.register(new WearFloatingConfig());
     if (!SetColorsScreenAccess.isRegistered())

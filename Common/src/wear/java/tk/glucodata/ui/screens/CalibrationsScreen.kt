@@ -29,22 +29,25 @@ import java.util.Date
 import tk.glucodata.Applic
 import tk.glucodata.CalibrationAccess
 import tk.glucodata.R
+import tk.glucodata.WearSibionicsCalibration
 import tk.glucodata.ui.WearNavigationRow
 import tk.glucodata.ui.WearSectionTitle
 
 private data class WearCalibration(val sourceValue: Float, val userValue: Float, val timestamp: Long)
 
-private fun calibrations(): List<WearCalibration> {
+private fun calibrations(localSession: WearSibionicsCalibration.Session?): List<WearCalibration> {
     val sensor = tk.glucodata.ui.WearGlucoseStore.currentSensor()
     val rawMode = runCatching {
         tk.glucodata.CurrentDisplaySource.resolveViewModeForSensor(sensor) in setOf(1, 3)
     }.getOrDefault(false)
-    val packed = CalibrationAccess.getActiveCalibrationAnchors(sensor, rawMode)
-    return packed.indices.step(3).mapNotNull { offset ->
+    fun decode(packed: DoubleArray) = packed.indices.step(3).mapNotNull { offset ->
         if (offset + 2 >= packed.size) null else WearCalibration(
             packed[offset].toFloat(), packed[offset + 1].toFloat(), packed[offset + 2].toLong(),
         ).takeIf { it.timestamp > 0L && it.userValue.isFinite() && it.userValue > 0f }
-    }.asReversed()
+    }
+    val phoneAndLocal = decode(CalibrationAccess.getActiveCalibrationAnchors(sensor, rawMode))
+    val stored = if (localSession == null) emptyList() else decode(WearSibionicsCalibration.localAnchors(localSession))
+    return (stored + phoneAndLocal).distinctBy { it.timestamp }.sortedByDescending { it.timestamp }
 }
 
 @Composable
@@ -55,7 +58,8 @@ fun CalibrationScreen(
     var revision by remember { mutableIntStateOf(0) }
     val isMmol = remember { runCatching { Applic.unit == 1 }.getOrDefault(false) }
     val conversion = if (isMmol) 18.0182f else 1f
-    val entries = remember(revision) { calibrations() }
+    val localSession = remember { WearSibionicsCalibration.selectedSession() }
+    val entries = remember(revision, localSession) { calibrations(localSession) }
     val enabled = remember(revision) {
         runCatching { tk.glucodata.CalibrationAccess.hasActiveCalibration(false, null) }.getOrDefault(false)
     }
@@ -63,7 +67,7 @@ fun CalibrationScreen(
     val formatter = remember(context) { DateFormat.getDateFormat(context) }
     val timeFormatter = remember(context) { DateFormat.getTimeFormat(context) }
     val canCalibrate = remember {
-        findCalibratableDriver() != null ||
+        localSession != null || findCalibratableDriver() != null ||
             (tk.glucodata.MessageSender.isWearTransportAvailable() && tk.glucodata.MessageSender.getMessageSender() != null)
     }
 
@@ -73,9 +77,10 @@ fun CalibrationScreen(
             if (canCalibrate) {
                 item { WearNavigationRow(stringResource(R.string.calibrate_action), stringResource(R.string.glucose_value), onClick = onCalibrate) }
             }
-            // CalibrationManager lives on the phone, so these relay a command
-            // and let the resulting calibration state sync back.
-            item {
+            if (localSession != null && WearSibionicsCalibration.isSuspended(localSession)) {
+                item { Text(stringResource(R.string.wear_calibration_local_suspended)) }
+            }
+            if (localSession == null) item {
                 WearNavigationRow(
                     stringResource(if (enabled) R.string.wear_calibration_on else R.string.wear_calibration_off),
                     onClick = {
@@ -87,7 +92,7 @@ fun CalibrationScreen(
                     },
                 )
             }
-            if (entries.isNotEmpty()) {
+            if (localSession == null && entries.isNotEmpty()) {
                 item {
                     WearNavigationRow(
                         stringResource(R.string.wear_calibration_clear),
@@ -107,7 +112,9 @@ fun CalibrationScreen(
                         .clip(RoundedCornerShape(20.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainer)
                         .then(
-                            onEditCalibration?.let { edit ->
+                            onEditCalibration?.takeIf {
+                                localSession == null || WearSibionicsCalibration.hasLocalPoint(localSession, entry.timestamp)
+                            }?.let { edit ->
                                 Modifier.clickable {
                                     edit(entry.timestamp, entry.userValue, entry.sourceValue)
                                 }

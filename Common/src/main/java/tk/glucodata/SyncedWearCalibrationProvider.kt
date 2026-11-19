@@ -13,6 +13,21 @@ object SyncedWearCalibrationProvider : CalibrationProvider {
     @Volatile
     private var restored = false
 
+    @Volatile
+    private var localOverlay: ((String, WearCalibrationPayload?) -> WearCalibrationPayload?)? = null
+    private val revision = java.util.concurrent.atomic.AtomicLong()
+
+    internal fun registerLocalOverlay(
+        overlay: (String, WearCalibrationPayload?) -> WearCalibrationPayload?,
+    ) {
+        localOverlay = overlay
+    }
+
+    internal fun localCalibrationChanged() {
+        revision.incrementAndGet()
+        publishCalibrationChange()
+    }
+
     private fun keyOf(sensorId: String): String =
         (runCatching { SensorIdentity.canonicalSensorId(sensorId) }.getOrNull() ?: sensorId).lowercase()
 
@@ -40,27 +55,29 @@ object SyncedWearCalibrationProvider : CalibrationProvider {
         }.onFailure { Log.stack("SyncedWearCalibration", "restore", it) }
     }
 
-    @Synchronized
     fun update(next: WearCalibrationPayload) {
         if (next.sensorId.isBlank()) return
-        restoreLocked()
-        val key = keyOf(next.sensorId)
-        val current = payloads[key]
-        if (current != null && next.revision < current.revision) return
-        payloads[key] = next
+        synchronized(this) {
+            restoreLocked()
+            val key = keyOf(next.sensorId)
+            val current = payloads[key]
+            if (current != null && next.revision < current.revision) return
+            payloads[key] = next
+            runCatching {
+                val prefs = Applic.app?.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+                prefs?.edit()?.putString(
+                    "$KEY.$key",
+                    android.util.Base64.encodeToString(WearCalibrationPayload.encode(next), android.util.Base64.NO_WRAP),
+                )?.apply()
+            }.onFailure { Log.stack("SyncedWearCalibration", "persist", it) }
+            revision.incrementAndGet()
+        }
+        publishCalibrationChange()
+    }
+
+    private fun publishCalibrationChange() {
         runCatching {
-            val prefs = Applic.app?.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
-            prefs?.edit()?.putString(
-                "$KEY.$key",
-                android.util.Base64.encodeToString(WearCalibrationPayload.encode(next), android.util.Base64.NO_WRAP),
-            )?.apply()
-        }.onFailure { Log.stack("SyncedWearCalibration", "persist", it) }
-        // A managed driver that integrates the calibration has to replay its
-        // history when the anchors move, exactly as CalibrationManager makes it
-        // do on the phone. Without this the watch kept serving readings fitted
-        // against the anchor set it started with.
-        runCatching {
-            tk.glucodata.drivers.ManagedSensorRuntime.notifyUserCalibrationRevisionChanged(next.revision)
+            tk.glucodata.drivers.ManagedSensorRuntime.notifyUserCalibrationRevisionChanged(getRevision())
         }.onFailure { Log.stack("SyncedWearCalibration", "notify drivers", it) }
         UiRefreshBus.requestDataRefresh()
     }
@@ -269,8 +286,7 @@ object SyncedWearCalibrationProvider : CalibrationProvider {
     }
 
     override fun getRevision(): Long {
-        restoreLocked()
-        return payloads.values.maxOfOrNull { it.revision } ?: 0L
+        return revision.get()
     }
 
     private fun mode(payload: WearCalibrationPayload, isRawMode: Boolean): WearCalibrationMode =
@@ -279,9 +295,16 @@ object SyncedWearCalibrationProvider : CalibrationProvider {
     private fun integratedByDriver(payload: WearCalibrationPayload, isRawMode: Boolean): Boolean =
         if (isRawMode) payload.rawIntegratedByDriver else payload.autoIntegratedByDriver
 
-    private fun matchingPayload(sensorId: String?): WearCalibrationPayload? {
+    internal fun phonePayload(sensorId: String?): WearCalibrationPayload? {
         restoreLocked()
         return selectPayload(payloads.values, sensorId, resolveMainSensorId())
+    }
+
+    private fun matchingPayload(sensorId: String?): WearCalibrationPayload? {
+        val phone = phonePayload(sensorId)
+        val overlay = localOverlay ?: return phone
+        val requested = sensorId ?: resolveMainSensorId() ?: return phone
+        return overlay(requested, phone)
     }
 
     private fun resolveMainSensorId(): String? =

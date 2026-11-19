@@ -15,6 +15,7 @@ internal data class WearSensorPresentation(
     val startTimeMs: Long,
     val lastReadingMs: Long,
     val rssi: Int?,
+    val batteryPercent: Int?,
 )
 
 private const val DAY_MS = 24L * 60L * 60L * 1000L
@@ -80,6 +81,7 @@ internal fun loadWearSensorPresentation(sensorId: String, nowMs: Long): WearSens
         // 9999 is SuperGattCallback's "no RSSI read yet" sentinel; only a real
         // dBm figure may be shown ("9999 dBm" reached the watch UI).
         rssi = managed?.rssi?.takeIf { it in -120..0 },
+        batteryPercent = managed?.batteryPercent?.takeIf { it in 0..100 },
     )
 }
 

@@ -143,9 +143,11 @@ object WearGlucoseStore {
      * sensor, because the peers are corrected on the same pass as the primary
      * and a single shared cache thrashed between them.
      */
+    private data class CachedCalibration(val input: Float, val corrected: Float)
+
     private class CalibrationCache(val key: String) {
-        val auto = HashMap<Long, Float>()
-        val raw = HashMap<Long, Float>()
+        val auto = HashMap<Long, CachedCalibration>()
+        val raw = HashMap<Long, CachedCalibration>()
     }
     private val calibrationCaches = HashMap<String, CalibrationCache>()
     private const val CALIBRATION_CACHE_MAX = 25_000
@@ -382,11 +384,13 @@ object WearGlucoseStore {
         fun corrected(value: Float, timestamp: Long, rawLane: Boolean): Float {
             if (!value.isFinite() || value <= 0f) return value
             val lane = if (rawLane) cache.raw else cache.auto
-            synchronized(cache) { lane[timestamp] }?.let { return it }
+            synchronized(cache) { lane[timestamp] }
+                ?.takeIf { it.input == value }
+                ?.let { return it.corrected }
             val result = runCatching {
                 CalibrationAccess.getCalibratedValue(value, timestamp, rawLane, false, sensor)
             }.getOrDefault(value).takeIf { it.isFinite() && it > 0f } ?: value
-            synchronized(cache) { lane[timestamp] = result }
+            synchronized(cache) { lane[timestamp] = CachedCalibration(value, result) }
             return result
         }
 

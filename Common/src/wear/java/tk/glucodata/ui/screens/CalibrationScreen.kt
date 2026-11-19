@@ -36,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import tk.glucodata.Applic
 import tk.glucodata.MessageSender
 import tk.glucodata.R
+import tk.glucodata.WearSibionicsCalibration
 import tk.glucodata.drivers.ManagedCalibration
 
 // Single conversion point, same constant as CurrentDisplaySource.
@@ -55,6 +56,11 @@ fun CalibrationEntryScreen(
     readingTimestamp: Long = 0L,
 ) {
     val editing = editTimestamp > 0L
+    val localSession = remember { WearSibionicsCalibration.selectedSession() }
+    val reference = remember {
+        if (editing) null else localSession?.let { WearSibionicsCalibration.reference(it, readingTimestamp) }
+    }
+    val localBaseline = reference?.sample?.displayedMgdl ?: sensorValueMgdl
     val isMmol = remember { runCatching { Applic.unit == 1 }.getOrDefault(false) }
     val hasLocalDriver = remember { findCalibratableDriver() != null }
     val canRelay = remember { MessageSender.isWearTransportAvailable() && MessageSender.getMessageSender() != null }
@@ -70,7 +76,7 @@ fun CalibrationEntryScreen(
     val seedDisplay = remember {
         val editSeed = editUserValueMgdl.takeIf { it.isFinite() && it > 0f }
             ?.let { if (isMmol) it / MGDL_PER_MMOLL else it }
-        val sensorSeed = sensorValueMgdl.takeIf { it.isFinite() && it > 0f }
+        val sensorSeed = localBaseline.takeIf { it.isFinite() && it > 0f }
             ?.let { if (isMmol) it / MGDL_PER_MMOLL else it }
         editSeed ?: sensorSeed ?: (if (isMmol) 5.5f else 100f)
     }
@@ -103,8 +109,18 @@ fun CalibrationEntryScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            if (!editing && !hasLocalDriver && !canRelay) {
-                // No locally connected calibratable sensor and no phone link.
+            if (!editing && localSession != null && reference == null) {
+                Text(
+                    text = stringResource(
+                        if (WearSibionicsCalibration.isAutoSelected()) R.string.wear_calibration_fresh_local_required
+                        else R.string.wear_calibration_auto_required,
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                return@Column
+            }
+            if (!editing && localSession == null && !hasLocalDriver && !canRelay) {
                 Text(
                     text = stringResource(R.string.no_sensor_title),
                     style = MaterialTheme.typography.titleMedium,
@@ -125,7 +141,7 @@ fun CalibrationEntryScreen(
                     ?.primaryValue
                     ?.takeIf { it.isFinite() && it > 0f }
             }
-            val sensorDisplay = sensorValueMgdl.takeIf { it.isFinite() && it > 0f }
+            val sensorDisplay = localBaseline.takeIf { it.isFinite() && it > 0f }
                 ?.let { if (isMmol) it / MGDL_PER_MMOLL else it }
                 ?: currentDisplay
             Text(
@@ -170,6 +186,7 @@ fun CalibrationEntryScreen(
                     sending = true
                     resultOk = null
                     val mgdl = if (isMmol) (value * MGDL_PER_MMOLL).roundToInt() else value.roundToInt()
+                    val exactMgdl = if (isMmol) value * MGDL_PER_MMOLL else value
                     // The work goes to IO, but onDone() navigates and
                     // NavController may only be touched from the main thread —
                     // calling it from the IO dispatcher crashed right after the
@@ -177,6 +194,9 @@ fun CalibrationEntryScreen(
                     scope.launch {
                         val ok = withContext(Dispatchers.IO) {
                             when {
+                                editing && localSession != null ->
+                                    WearSibionicsCalibration.edit(localSession, editTimestamp, exactMgdl)
+                                reference != null -> WearSibionicsCalibration.save(reference, exactMgdl)
                                 editing -> tk.glucodata.WearCalibrationCommand.send(
                                     tk.glucodata.WearCalibrationCommand.EDIT,
                                     editTimestamp,
@@ -210,10 +230,14 @@ fun CalibrationEntryScreen(
                         sending = true
                         scope.launch {
                             val ok = withContext(Dispatchers.IO) {
-                                tk.glucodata.WearCalibrationCommand.send(
-                                    tk.glucodata.WearCalibrationCommand.DELETE,
-                                    editTimestamp,
-                                )
+                                if (localSession != null) {
+                                    WearSibionicsCalibration.delete(localSession, editTimestamp)
+                                } else {
+                                    tk.glucodata.WearCalibrationCommand.send(
+                                        tk.glucodata.WearCalibrationCommand.DELETE,
+                                        editTimestamp,
+                                    )
+                                }
                             }
                             resultOk = ok
                             sending = false
@@ -226,7 +250,13 @@ fun CalibrationEntryScreen(
             }
             resultOk?.let { ok ->
                 Text(
-                    text = if (ok) stringResource(R.string.calibrated) else stringResource(R.string.error),
+                    text = stringResource(
+                        when {
+                            ok -> R.string.calibrated
+                            localSession != null -> R.string.wear_calibration_local_save_failed
+                            else -> R.string.error
+                        },
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 )

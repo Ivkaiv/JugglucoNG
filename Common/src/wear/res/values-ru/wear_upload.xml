@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wear_calibration_fresh_local_required">Дождитесь свежего показания от датчика, подключённого к часам.</string>
+    <string name="wear_calibration_auto_required">Для калибровки на часах выберите «Авто» в настройках датчика.</string>
+    <string name="wear_calibration_local_save_failed">Не удалось сохранить калибровку на часах.</string>
+    <string name="wear_calibration_local_suspended">Калибровки часов приостановлены. Их не удалось совместить с калибровкой телефона.</string>
+    <string name="wear_upload_title">Nightscout с часов</string>
+    <string name="wear_upload_token">Токен доступа Nightscout</string>
+    <string name="wear_upload_start_hint">Только новые показания Sibionics с этих часов. Один отправитель на датчик.</string>
+    <string name="wear_upload_start">Включить</string>
+    <string name="wear_upload_stop">Остановить</string>
+    <string name="wear_upload_stop_hint">Удалить токен и очередь неотправленных показаний с часов?</string>
+    <string name="wear_upload_status">В очереди: %1$d\nВремя последнего доставленного замера: %2$s</string>
+    <string name="wear_upload_network">Доставка не подтверждена. Будет повторная попытка.</string>
+    <string name="wear_upload_full">Очередь на часах заполнена.</string>
+    <string name="wear_upload_error">Проверьте HTTPS-адрес и токен доступа или попробуйте позже.</string>
+    <string name="wear_upload_edit">Адрес и токен</string>
+    <string name="wear_upload_address">Адрес сервера</string>
+    <string name="wear_upload_active">Отправка включена</string>
+    <string name="wear_upload_inactive">Отправка выключена</string>
+    <string name="wear_upload_pending">В очереди: %1$d</string>
+    <string name="wear_upload_last">Последний доставленный: %1$s</string>
+    <string name="wear_upload_send_now">Отправить сейчас</string>
+    <string name="wear_upload_send_requested">Отправка запрошена.</string>
+    <string name="wear_upload_empty">Очередь пуста.</string>
+    <string name="wear_upload_token_saved">Токен сохранён</string>
+    <string name="wear_upload_keep_token">Пустое поле сохранит текущий токен.</string>
+    <string name="wear_upload_bad_address">Введите HTTPS-адрес сервера без пути.</string>
+    <string name="wear_upload_token_required">Введите токен доступа Nightscout для этого сервера.</string>
+    <string name="wear_upload_pending_on_previous">Отправьте очередь на прежний сервер или остановите отправку и подтвердите очистку очереди перед сменой адреса.</string>
+    <string name="wear_upload_bad_token">HTTP 401: проверьте токен доступа.</string>
+    <string name="wear_upload_forbidden">HTTP 403: у токена должно быть право записи показаний.</string>
+    <string name="wear_sensor_battery_complication">Батарея датчика</string>
+    <string name="wear_sensor_battery_description">Батарея датчика: %1$s</string>
+</resources>

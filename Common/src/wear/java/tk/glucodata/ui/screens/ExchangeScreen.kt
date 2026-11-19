@@ -26,6 +26,7 @@ import tk.glucodata.R
 import tk.glucodata.UiRefreshBus
 import tk.glucodata.WearToggleSync
 import tk.glucodata.ui.WearSectionTitle
+import tk.glucodata.ui.WearNavigationRow
 
 /**
  * On/off for the exchange outputs that are a plain switch.
@@ -40,7 +41,7 @@ import tk.glucodata.ui.WearSectionTitle
  * should not do silently.
  */
 @Composable
-fun ExchangeScreen() {
+fun ExchangeScreen(onOpenNightscout: () -> Unit) {
     var revision by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
@@ -54,6 +55,9 @@ fun ExchangeScreen() {
             contentPadding = PaddingValues(horizontal = 22.dp, vertical = 28.dp),
         ) {
             item { WearSectionTitle(stringResource(R.string.wear_exchange_title)) }
+            item {
+                WearNavigationRow(stringResource(R.string.wear_upload_title), onClick = onOpenNightscout)
+            }
             items(ExchangeToggles.all) { toggle ->
                 val known = remember(revision, toggle.id) {
                     WearToggleSync.knownEnabled(WearToggleSync.SCOPE_EXCHANGE, toggle.id)
